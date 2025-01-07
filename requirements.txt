@@ -64,8 +64,6 @@ jsonpath-python==1.0.6
 jsonpointer==3.0.0
 jsonschema==4.23.0
 jsonschema-specifications==2024.10.1
-# Editable Git install with no remote (knocks==0.1)
--e /Users/kon_yu/development/uzumaki/streamlit_100
 kubernetes==31.0.0
 langchain==0.3.13
 langchain-chroma==0.1.4
