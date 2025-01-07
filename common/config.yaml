@@ -1,0 +1,10 @@
+cookie:
+  expiry_days: 1
+  key: knock_signature_key
+  name: knock_cookie_name
+credentials:
+  usernames:
+    demo:
+      email: konyu@example.com
+      name: demo
+      password: $2b$12$Qs5uKZdrOawt2d7IcHlJAu2PYctMSdEqN4yUctz5qxJUYRZN7VXXO
