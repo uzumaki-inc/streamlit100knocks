@@ -3,6 +3,10 @@ import streamlit as st
 from weather_utils import get_weather_data, generate_poem, Forecast
 from typing import List
 
+# OpenAIの環境変数を読み込み
+from common.util import load_environment
+load_environment()
+
 # 都道府県の都市コード辞書
 CITY_CODES = {
     "札幌": "016010",
@@ -43,7 +47,7 @@ else:
 
     # 天気に基づくポエム生成
     st.write("### 天気感覚のポエム：")
-    if os.getenv("ENVIRONMENT") == "PRODUCTION":
+    if os.getenv("ENV") == "production":
         poem = generate_poem(weather_description, llm_type="openai")
     else:
         poem = generate_poem(weather_description, llm_type="ollama")
