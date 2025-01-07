@@ -2,7 +2,7 @@ import streamlit as st
 from streamlit.components.v1 import html
 import tempfile
 import os
-from reviewer import process_word_file,word_to_html, get_retriever
+from .reviewer import process_word_file,word_to_html, get_retriever
 
 # StreamlitのUI部分
 st.title("Wordファイル校正アプリ(RAG) ver.2")
