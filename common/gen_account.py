@@ -58,12 +58,6 @@ if __name__ == "__main__":
 
     # 環境変数からユーザー情報を取得
     user_data = get_user_data_from_env()
-
-    # # ユーザー情報を定義
-    # user_data = [
-    #     {"username": "demo", "email": "konyu@example.com", "password": "P@ssword"},
-    # ]
-    # # YAMLを生成
     yaml_output = generate_yaml_credentials(user_data)
 
     # 出力を表示
