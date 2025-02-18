@@ -36,7 +36,7 @@ def fetch_json_data_with_webdriver(key: str, limit: int = 10) -> Optional[Dict]:
 
     # ChromeDriverのパスを指定
     # 下記のパスはmacOSの場合のパス
-    service = Service("/usr/local/bin/chromedriver")  # ChromeDriverのパス
+    service = Service("/opt/homebrew/bin/chromedriver")  # ChromeDriverのパス
     driver = webdriver.Chrome(service=service, options=chrome_options)
 
     try:
