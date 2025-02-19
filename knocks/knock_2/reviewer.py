@@ -1,7 +1,9 @@
 import json
-from langchain.prompts import PromptTemplate
-from langchain_openai import ChatOpenAI
+from langchain.prompts import ChatPromptTemplate
 from langchain_unstructured import UnstructuredLoader
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_openai import ChatOpenAI
+
 
 from docx import Document
 from docx.shared import RGBColor
@@ -53,53 +55,39 @@ def load_word_file_with_langchain(file_path: str) -> str:
     documents = loader.load()
     return "\n".join([doc.page_content for doc in documents])
 
+
+correction_prompt = ChatPromptTemplate.from_template("""
+以下の日本語テキストに含まれる誤字脱字や不適切な表現を修正し、JSON形式で出力してください。
+
+各修正箇所には、元の表現、修正後の表現、修正理由、行番号を含めてください。
+
+出力フォーマット:
+[
+    {{
+        "original": "<元の表現>",
+        "corrected": "<修正後の表現>",
+        "reason": "<修正理由>",
+        "line_number": <行番号>
+    }}
+]
+
+テキスト:
+{input}
+""")
+
 def correct_text_with_llm(text: str) -> list:
     """
     テキストから誤字脱字や不適切な表現を修正し、JSON形式で返す関数。
     """
     llm = ChatOpenAI(model="gpt-4o", temperature=0)
 
-    prompt = PromptTemplate(
-        input_variables=["text"],
-        template="""
-        以下の日本語テキストに含まれる誤字脱字や不適切な表現を修正し、**必ず純粋なJSON形式**で出力してください。
-        各修正箇所には、元の表現、修正後の表現、修正理由、行番号を含めてください
-        JSONフォーマット:
-        [
-          {{
-            "original": "<元の表現>",
-            "corrected": "<修正後の表現>",
-            "reason": "<修正理由>",
-            "line_number": <行番号>
-          }}
-        ]
-
-        出力するJSONは以下の条件を守ってください:
-        1. **純粋なJSONオブジェクトのみ**を出力してください。
-        2. コードブロック記号やコメントは一切含めないでください。
-        3. テキスト以外の余分な空白や説明も含めないでください。
-
-        テキスト:
-        {text}
-
-        注意: JSON形式以外のテキスト、余計な説明、追加のコメントは出力しないでください。出力は必ず**JSONオブジェクトのみ**にしてください。
-        """
+    correction_chain = (
+        correction_prompt
+        | llm
+        | JsonOutputParser()
     )
-    # RunnableLambdaでフォーマット済みのプロンプトを作成
-    formatted_prompt = prompt.format(text=text)
 
-    # ChatOpenAIに直接渡せる形式に変更
-    response = llm.invoke(formatted_prompt)
-    # AIMessageからcontentを取り出してJSONパース
-    response_content = response.content  # ここでcontentを抽出
-    print(response_content)
-
-    try:
-        corrections = json.loads(response_content)
-    except json.JSONDecodeError:
-        raise ValueError("LLMの出力がJSON形式ではありませんでした。")
-
-    return corrections
+    return correction_chain.invoke({"input": text})
 
 def add_corrections_to_word(input_file: str, corrections: list, output_file: str):
     """

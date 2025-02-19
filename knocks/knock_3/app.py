@@ -2,7 +2,8 @@ import streamlit as st
 from streamlit.components.v1 import html
 import tempfile
 import os
-from .reviewer import process_word_file,word_to_html, get_retriever
+from reviewer import process_word_file, word_to_html
+
 
 # StreamlitのUI部分
 st.title("Wordファイル校正アプリ(RAG) ver.2")
@@ -10,9 +11,6 @@ st.write("Wordファイルをドラッグアンドドロップでアップロー
 
 # ファイルアップロード
 uploaded_file = st.file_uploader("Wordファイルをアップロードしてください", type=["docx"])
-
-print("retriever取得")
-retriver = get_retriever()
 
 # ファイルがアップロードされた場合
 if uploaded_file is not None:
@@ -39,7 +37,8 @@ if uploaded_file is not None:
             """, height=300)
         # process_word_fileを呼び出す
         st.info("ファイルを処理しています。少々お待ちください...")
-        process_word_file(input_path, output_path, retriver)
+        process_word_file(input_path, output_path)
+
 
         # 処理後のWordファイルを読み込んでプレビュー表示
         st.subheader("修正後のファイルの内容:")

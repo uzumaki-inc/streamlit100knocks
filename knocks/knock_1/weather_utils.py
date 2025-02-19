@@ -1,7 +1,11 @@
 import requests
+from typing import TypedDict, List, Dict, Optional
+
 from langchain_ollama import ChatOllama
 from langchain_community.chat_models import ChatOpenAI
-from typing import TypedDict, List, Dict, Optional
+from langchain.prompts import ChatPromptTemplate
+from langchain.schema.output_parser import StrOutputParser
+
 
 # TypedDictを定義
 class Forecast(TypedDict):
@@ -50,43 +54,14 @@ def initialize_llm(llm_type):
     else:
         raise ValueError(f"Unsupported LLM type: {llm_type}")
 
-def create_prompt(weather_description):
-    """
-    天気の説明からプロンプトを生成する関数
+poem_prompt = ChatPromptTemplate.from_template("""
+あなたは天気をモチーフにした詩を生成する詩人です。
 
-    Parameters:
-        weather_description (str): 天気の説明
+天気は「{input}」です。
+日本語でこの天気からインスピレーションを得た短いポエムを書いてください。
+""")
 
-    Returns:
-        str: LLMへのプロンプト
-    """
-    return f"天気は「{weather_description}」です。日本語でこの天気からインスピレーションを得た短いポエムを書いてください。"
-
-def generate_poem(weather_description, llm_type="ollama"):
-    """
-    天気からポエムを生成する関数
-
-    Parameters:
-        weather_description (str): 天気の説明
-        llm_type (str): 使用するLLMの種類 ("ollama" または "openai")
-
-    Returns:
-        str: 生成されたポエムまたはエラーメッセージ
-    """
-    try:
-        # LLMの初期化
-        llm = initialize_llm(llm_type)
-
-        # プロンプトの生成
-        prompt = create_prompt(weather_description)
-
-        # LLMを使用してポエム生成
-        response = llm.invoke(prompt)
-
-        # レスポンスの内容をチェック
-        if hasattr(response, "content"):
-            return response.content
-        else:
-            return "No content available in the response."
-    except Exception as e:
-        return f"ポエムを生成するのに失敗しました：{e}"
+def generate_poem(weather_description: str, llm_type: str = "ollama") -> str:
+    llm = initialize_llm(llm_type)
+    poem_chain = poem_prompt | llm | StrOutputParser()
+    return poem_chain.invoke({"input": weather_description})

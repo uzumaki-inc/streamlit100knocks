@@ -1,103 +1,146 @@
-import json
 import os
-from langchain.prompts import PromptTemplate
-from langchain_openai import ChatOpenAI
-from langchain_unstructured import UnstructuredLoader
-
+from langchain.text_splitter import CharacterTextSplitter
+from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain.prompts import ChatPromptTemplate
 from docx import Document
 from docx.shared import RGBColor
-
-from langchain.document_loaders import TextLoader
-from langchain.schema import Document as LangDocument
-from langchain.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings
-
-# OpenAIの環境変数を読み込み
 from common.util import load_environment
+from langchain_core.output_parsers import JsonOutputParser
+from langchain.schema.runnable import RunnablePassthrough
+from operator import itemgetter
+
+
 load_environment()
 
+def create_review_chain():
+    template = """
+    あなたは日立のスタイルガイドに基づいて文章を校正する専門家です。
 
-def load_style_guide(file_path: str):
+    スタイルガイドの関連部分:
+    {context}
+
+    以下の文章を校正してください:
+    {text}
+
+    必ず以下の形式のJSONで出力してください:
+    [
+        {{
+            "original": "修正が必要な元の表現",
+            "corrected": "修正後の表現",
+            "reason": "修正理由",
+            "line_number": 行番号
+        }}
+    ]
     """
-    スタイルガイドをテキストファイルからロードし、LangDocument形式に変換する。
-    :param file_path: スタイルガイドのテキストファイルパス
-    :return: LangDocumentのリスト
-    """
-    loader = TextLoader(file_path)
-    documents = loader.load()
 
-    # ルールごとに分割してLangDocument形式に変換
-    rules = documents[0].page_content.split("\nルール:")
-    # print(rules)
-    return [LangDocument(page_content=rule.strip()) for rule in rules if rule.strip()]
+    prompt = ChatPromptTemplate.from_template(template)
+    return prompt
 
-
-def create_vectorstore(docs, embeddings_model: str = "text-embedding-3-small"):
-    """
-    LangDocumentリストをChromaベクトルストアに登録する。
-    :param docs: LangDocument形式のリスト
-    :param embeddings_model: Embeddingsモデル名
-    :return: Chromaベクトルストア
-    """
-    embeddings = OpenAIEmbeddings(model=embeddings_model)
-
-    if os.getenv("ENV") != "production":
-        # Development environment - use SQLite persistence
-        persist_directory = "./chroma_store"
-        try:
-            vectorstore = Chroma(
-                persist_directory=persist_directory,
-                embedding_function=embeddings
-            )
-            print("既存のベクトルストアをロードしました。")
-            return vectorstore
-        except Exception as e:
-            print(f"新しいベクトルストアを作成します: {e}")
-            vectorstore = Chroma.from_documents(
-                docs,
-                embeddings,
-                persist_directory=persist_directory
-            )
-            return vectorstore
-    else:
-        # Production environment - in-memory storage
-        vectorstore = Chroma.from_documents(
-            docs,
-            embeddings,
-            persist_directory=None  # This makes it run in-memory
-        )
-        return vectorstore
-
-
-
-def get_style_guide_rules(retriever):
-    """
-    スタイルガイドのルールを取得する。
-    """
-    # クエリを検索
-    query = "日立のスタイルガイドはありますか？"
-
-    context_docs = retriever.invoke(query)
-    rules = "\n\n".join([doc.page_content for doc in context_docs])
-    print("クエリ実行結果")
-    print(rules)
-
-    return rules
-
-def get_retriever():
-    print("retriever取得")
-    # スタイルガイドのファイルパス
-    file_path = "./knocks/knock_3/style_guide.txt"
-
-    # スタイルガイドをロード
-    docs = load_style_guide(file_path)
-
-    db = create_vectorstore(docs)
+def review_text(text: str, db) -> list:
+    model = ChatOpenAI(model="gpt-4o", temperature=0)
+    prompt = create_review_chain()
     retriever = db.as_retriever()
-    get_style_guide_rules(retriever)
 
-    return retriever
+    # レビューチェーンの構築
+    review_chain = (
+        {
+            "text": RunnablePassthrough(),
+            "context": retriever,
+        }
+        | prompt
+        | model
+        | JsonOutputParser()
+    )
 
+    # チェーンの実行
+    try:
+        result = review_chain.invoke(text)
+        return result
+    except Exception as e:
+        print(f"エラー: {e}")
+        return []
+
+def add_corrections_to_word(input_file: str, corrections: list, output_file: str):
+    """
+    Wordファイルに修正箇所を擬似コメントとして追加し、修正版を保存する。
+    修正内容は対象段落の末尾に太字・赤色テキストとして追加される。
+    """
+    doc = Document(input_file)
+    paragraphs = doc.paragraphs
+
+
+    for correction in corrections:
+        line_number = correction["line_number"] - 1  # 行番号を0ベースに変換
+        original = correction["original"]
+        corrected = correction["corrected"]
+        reason = correction["reason"]
+
+        # 指定された行番号の段落に修正案を追加
+        if 0 <= line_number < len(paragraphs):
+            paragraph = paragraphs[line_number]
+            if original in paragraph.text:  # originalが含まれている場合のみ
+                # 修正案を末尾に追加
+                comment_text = f" [修正案: '{corrected}' 理由: {reason}]"
+                run = paragraph.add_run(comment_text)
+                run.bold = True  # 太字
+                run.font.color.rgb = RGBColor(255, 0, 0)  # 赤色
+
+    # Wordファイルを保存
+    doc.save(output_file)
+    print(f"修正版Wordファイルが {output_file} に保存されました。")
+
+def load_and_prepare_vectorstore(style_guide_path: str, persist_dir: str = "./chroma_db") -> Chroma:
+    """
+    スタイルガイドのベクトルストアを準備する。
+    既存のベクトルストアがある場合は再利用し、ない場合は新規作成する。
+    """
+    # 既存のベクトルストアがあるか確認
+    if os.path.exists(persist_dir):
+        print("既存のベクトルストアを読み込んでいます...")
+        embeddings = OpenAIEmbeddings()
+        return Chroma(persist_directory=persist_dir, embedding_function=embeddings)
+
+    # 新規作成の場合
+    print("スタイルガイドを読み込んでいます...")
+    with open(style_guide_path, "r", encoding="utf-8") as f:
+        style_guide = f.read()
+
+    print("新規ベクトルストアを作成しています...")
+    text_splitter = CharacterTextSplitter(
+        separator="\n\n",
+        chunk_size=1000,
+        chunk_overlap=200
+    )
+    chunks = text_splitter.split_text(style_guide)
+
+    embeddings = OpenAIEmbeddings()
+
+    # 本番環境ではメモリに保存する
+    is_production = os.getenv("ENV") == "production"
+    if is_production:
+        persist_dir = None
+
+    vectorstore = Chroma.from_texts(
+        texts=chunks,
+        embedding=embeddings,
+        persist_directory=persist_dir
+    )
+
+    return vectorstore
+
+def process_word_file(input_file: str, output_file: str):
+    db = load_and_prepare_vectorstore(style_guide_path="style_guide.txt")
+
+    print("Wordファイルを読み込んでいます...")
+    doc = Document(input_file)
+    text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+
+    print("文章を校正しています...")
+    corrections = review_text(text, db)
+
+    print("修正をWordファイルに適用しています...")
+    add_corrections_to_word(input_file, corrections, output_file)
 
 # WordファイルをHTMLに変換する関数
 def word_to_html(file_path):
@@ -128,116 +171,8 @@ def word_to_html(file_path):
 
     return html_content
 
-# Wordファイルの内容を読み込む関数
-def read_word_file(file_path):
-    doc = Document(file_path)
-    content = [paragraph.text for paragraph in doc.paragraphs]
-    return "\n".join(content)
 
-def load_word_file_with_langchain(file_path: str) -> str:
-    """
-    LangChainのUnstructuredLoaderを使用してWordファイルからテキストを抽出する。
-    """
-    loader = UnstructuredLoader(file_path)
-    documents = loader.load()
-    return "\n".join([doc.page_content for doc in documents])
-
-def correct_text_with_llm(text: str, retriever) -> list:
-    llm = ChatOpenAI(
-        model="gpt-4o",
-        temperature=0
-    )
-
-    rules = get_style_guide_rules(retriever)
-
-    prompt = PromptTemplate(
-        input_variables=["text", "rules"],
-        template="""
-        以下のチェック対象テキストの校正結果をJSON形式で出力してください。
-
-        スタイルガイド:
-        {rules}
-
-        チェック対象テキスト:
-        {text}
-
-        必ず以下の形式のJSONで出力してください:
-        {{
-          "corrections": [
-            {{
-              "original": "修正前の表現",
-              "corrected": "修正後の表現",
-              "reason": "修正理由",
-              "line_number": 行番号
-            }}
-          ]
-        }}
-        """
-    )
-
-    formatted_prompt = prompt.format(text=text, rules=rules)
-    print(formatted_prompt)
-    response = llm.invoke(formatted_prompt)
-    print("invoke結果")
-    print(response.content)
-
-    try:
-        # 出力結果が```json```で囲まれている場合、それを取り除く
-        cleaned_output = (response.content).strip("```json").strip("```").strip()
-        result = json.loads(cleaned_output)
-        print("invoke結果")
-        print(result)
-        return result.get("corrections", [])
-    except json.JSONDecodeError:
-        return []
-
-def add_corrections_to_word(input_file: str, corrections: list, output_file: str):
-    """
-    Wordファイルに修正箇所を擬似コメントとして追加し、修正版を保存する。
-    修正内容は対象段落の末尾に太字・赤色テキストとして追加される。
-    """
-    doc = Document(input_file)
-    paragraphs = doc.paragraphs
-
-
-    for correction in corrections:
-        print("修正内容")
-        print(correction)
-        line_number =  int(str(correction["line_number"])) - 1  # 行番号を0ベースに変換
-        original = correction["original"]
-        corrected = correction["corrected"]
-        reason = correction["reason"]
-
-        # 指定された行番号の段落に修正案を追加
-        if 0 <= line_number < len(paragraphs):
-            paragraph = paragraphs[line_number]
-            if original in paragraph.text:  # originalが含まれている場合のみ
-                # 修正案を末尾に追加
-                comment_text = f" [修正案: '{corrected}' 理由: {reason}]"
-                run = paragraph.add_run(comment_text)
-                run.bold = True  # 太字
-                run.font.color.rgb = RGBColor(255, 0, 0)  # 赤色
-
-    # Wordファイルを保存
-    doc.save(output_file)
-    print(f"修正版Wordファイルが {output_file} に保存されました。")
-
-def process_word_file(input_file: str, output_file: str, retriever):
-    """
-    Wordファイルを読み込み、修正をコメントとして追加し、新しいWordファイルを保存する。
-    """
-    print("LangChainでWordファイルを読み込んでいます...")
-    text = load_word_file_with_langchain(input_file)
-
-    print("誤字脱字の修正を実行しています...")
-    corrections = correct_text_with_llm(text, retriever)
-
-    print("Wordファイルにコメントを追加しています...")
-    add_corrections_to_word(input_file, corrections, output_file)
-
-# 実行例
 if __name__ == "__main__":
-    input_word_file = "knocks/knock_2/input.docx"  # 入力Wordファイル
-    output_word_file = "knocks/knock_2/output.docx"  # 出力Wordファイル
-
+    input_word_file = "./input_h.docx"
+    output_word_file = "./output.docx"
     process_word_file(input_word_file, output_word_file)
