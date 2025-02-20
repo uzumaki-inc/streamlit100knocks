@@ -1,4 +1,5 @@
 import os
+import sys
 import random
 import pandas as pd
 from typing import List, Dict
@@ -10,7 +11,6 @@ from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-
 
 
 def read_phrases_csv() -> List[Dict]:
@@ -39,8 +39,10 @@ def get_random_phrases(phrases, num_phrases = 3) -> List[Dict]:
 
 def create_prompt():
     template = """
-    こんにちは
-    {input}
+    こんにちは、あなたは日本語のフレーズを生成するツールです。
+    下記のURLからコンテンツを抽出して、Markdown形式で返してください。
+
+    URL: {url}
     """
 
     prompt = ChatPromptTemplate.from_template(template)
@@ -67,15 +69,16 @@ def extract_content_from_url(url: str) -> str:
     # MarkItDownを使用してMarkdownに変換
     markitdown = MarkItDown()
     result = markitdown.convert(url)
+    print(result)
     return result.text_content
 
 tools = [extract_content_from_url]
 model = ChatOpenAI(
             model="gpt-4o-mini",
             temperature=0,
-        )
+        ).bind_tools(tools)
 prompt = create_prompt()
-chain = prompt | model.bind_tools(tools) | StrOutputParser()
+chain = prompt | model
 
 if __name__ == "__main__":
     # データを取得して表示
@@ -90,7 +93,13 @@ if __name__ == "__main__":
     # print(f"=== Content from {test_url} ===")
     # print(markdown_content)
 
-    res = chain.invoke("hi!")
+
+    res = chain.invoke({"url": "https://konyu.hatenablog.com/entry/2024/12/07/000000"})
+    tool_call = res.tool_calls[0]
+    method_name = tool_call["name"]
+    method = getattr(sys.modules[__name__], method_name)
+    result = method.invoke(tool_call["args"])
+    print(result)
     print(res)
 
 
