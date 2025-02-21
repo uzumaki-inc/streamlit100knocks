@@ -1,5 +1,4 @@
-import os
-import sys
+import json
 import random
 import pandas as pd
 from typing import List, Dict
@@ -12,6 +11,18 @@ from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langgraph.prebuilt import create_react_agent
+
+from pydantic import BaseModel, Field
+# from langchain.pydantic_v1 import BaseModel, Field
+
+class EnglishPhrase(BaseModel):
+    phrase: str = Field(..., description="使用する英語フレーズ")
+    translation: str = Field(..., description="フレーズの日本語訳")
+    sentence: str = Field(..., description="作成された英文")
+    explanation: str = Field(..., description="英文の文法説明")
+
+class MeetingResponse(BaseModel):
+    phrases: List[EnglishPhrase] = Field(..., description="ミーティングで使用する英語フレーズのリスト")
 
 def read_phrases_csv() -> List[Dict]:
     """
@@ -56,24 +67,25 @@ def create_prompt(url: str) -> str:
         要件:
         - ミーティングは、社内ミーティングをイメージ、若干インフォーマルな口語にして下さい
         - 英語の発言の説明も日本語でして下さい
-        - 英語の説明は、大学進学向けの英語の授業のように説明して下さい
-
+        - 英文の説明は、日本語訳を "日本語訳「日本語訳の説明」"と「」で囲んで下さい。次に\nを追加して文法の説明を大学進学向けの英語の授業のように説明して下さい。その後\nを追加して、サイトのURL内容のどこを参考にしたかを明確にして下さい
 
 
         [[サイトのURL]]
         -----
         {url}
 
-        [[出力例]]:
-        -----
-        使った英語のフレーズ: When it comes to
-        日本語訳: 〜と言えば
 
-        英文:
-        When it comes to something, I bought a new pen.
-
-        英語の説明:
-        サイトのXXXXXという箇所から、ペンを買ったことを説明しています。
+        出力は必ず以下の形式で行ってください：
+            {{
+                "phrases": [
+                    {{
+                        "phrase": "英語フレーズ",
+                        "translation": "日本語訳",
+                        "sentence": 英文",
+                        "explanation": "英文の説明"
+                    }}
+                ]
+            }}
     """
 
     return template.format(url=url)
@@ -103,38 +115,36 @@ def extract_content_from_url(url: str) -> str:
     result = markitdown.convert(url)
     return result.text_content
 
-tools = [extract_content_from_url, get_random_phrases]
-model = ChatOpenAI(
-            model="gpt-4o",
-            temperature=0,
-        ).bind_tools(tools)
-agent = create_react_agent(model=model, tools=tools)#, prompt=prompt)
 
-# chain = prompt | model
+def create_agent():
+    tools = [extract_content_from_url, get_random_phrases]
+    model = ChatOpenAI(model="gpt-4o", temperature=0)
+    agent = create_react_agent(model=model, tools=tools)
+    return agent
 
 if __name__ == "__main__":
     # データを取得して表示
     # phrases_selected = get_random_phrases.invoke({"num_phrases": 2})
     # print(phrases_selected)
 
-    #  # Example URL
+    # Example URL
     # test_url = "https://konyu.hatenablog.com/entry/2024/12/07/000000"
     # markdown_content = extract_content_from_url(test_url)
     # print(f"=== Content from {test_url} ===")
     # print(markdown_content)
 
-    # inputs = { "messages": [
-    #     ("user", "Please extract and analyze content in Japanese from https://konyu.hatenablog.com/entry/2024/12/07/000000")
-    # ]}
     url = "https://konyu.hatenablog.com/entry/2024/12/07/000000"
-    prompt_text = create_prompt(url)
-    inputs = { "messages": [
-        ("user", prompt_text)
-    ]}
+    inputs = { "messages": [("system", create_prompt(url))]}
+    agent = create_agent()
 
-
-    for state in agent.stream(inputs, stream_mode="values"):
-        message = state["messages"][-1]
-        message.pretty_print()
-    # res = agent.invoke(inputs)
-    # print(res['messages'][-1].content)
+    # for state in agent.stream(inputs, stream_mode="values"):
+    #     message = state["messages"][-1]
+    #     message.pretty_print()
+    res = agent.invoke(inputs)
+    print(res['messages'][-1].content)
+    # 文字列からJSONへ変換
+    content = res['messages'][-1].content
+    json_data = json.loads(content)
+    # JSONからPydanticモデルへ変換
+    mrs = MeetingResponse(**json_data)
+    print(mrs)
