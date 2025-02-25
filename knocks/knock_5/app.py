@@ -16,15 +16,16 @@ def main():
                 try:
                     # 既存の実装を使用
                     agent = create_agent()
-                    inputs = {"messages": [("system", create_prompt(url))]}
+                    inputs = {"messages": [("system", create_prompt(url, 3))]}
                     res = agent.invoke(inputs)
 
                     # 文字列からJSONへ変換
                     content = res['messages'][-1].content
-                    json_data = json.loads(content)
+                    print("#### CONTENT DATA ####")
+                    print(content)
 
                     # JSONからPydanticモデルへ変換
-                    meeting_response = MeetingResponse(**json_data)
+                    meeting_response = MeetingResponse.model_validate_json(content)
 
                     # 結果の表示
                     for i, phrase in enumerate(meeting_response.phrases, 1):
@@ -33,13 +34,15 @@ def main():
                             with cols[0]:
                                 st.markdown("##### 英語フレーズ")
                                 st.info(phrase.phrase)
-                                st.markdown("##### 例文")
-                                st.success(phrase.sentence)
                             with cols[1]:
                                 st.markdown("##### 日本語訳")
                                 st.info(phrase.translation)
-                                st.markdown("##### 英文説明")
-                                st.info(phrase.explanation)
+
+                            st.markdown("##### 例文")
+                            st.success(phrase.sentence)
+                            st.markdown("##### 英文説明")
+                            st.info(phrase.explanation)
+
 
                 except Exception as e:
                     st.error(f"エラーが発生しました: {str(e)}")

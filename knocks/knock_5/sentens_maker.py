@@ -1,4 +1,3 @@
-import json
 import random
 import pandas as pd
 from typing import List, Dict
@@ -6,14 +5,10 @@ import validators
 from markitdown import MarkItDown
 
 from langchain_core.tools import tool
-from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 from langgraph.prebuilt import create_react_agent
 
 from pydantic import BaseModel, Field
-# from langchain.pydantic_v1 import BaseModel, Field
 
 class EnglishPhrase(BaseModel):
     phrase: str = Field(..., description="使用する英語フレーズ")
@@ -57,17 +52,19 @@ def get_random_phrases(num_phrases = 3) -> List[Dict]:
 
     return random.sample(phrases, min(num_phrases, len(phrases)))
 
-def create_prompt(url: str) -> str:
+def create_prompt(url: str, num: int) -> str:
     template = """
         あなたは英語を日本人に教えるプロフェッショナルです。
-        私は、ある[[サイトのURL]]の内容についてグローバルなメンバーと英語でミーティングを行います。
-        その[[サイトのURL]]の内容に沿って、ミーティングでの英語の発言を下記に示す[[使いたい英語のフレーズ]]を2つを使って作って下さい。
-        [[使いたい英語のフレーズ]]は、get_random_phrases(2)で取得して下さい。
+        私は、ある[[サイトのURL]]の内容について、グローバルなメンバーと英語でミーティングを行います。
+        その[[サイトのURL]]の内容に沿って、ミーティングでの英語の発言を[[使いたい英語のフレーズ]]を使って{num}個作って下さい。
 
         要件:
-        - ミーティングは、社内ミーティングをイメージ、若干インフォーマルな口語にして下さい
-        - 英語の発言の説明も日本語でして下さい
-        - 英文の説明は、日本語訳を "日本語訳「日本語訳の説明」"と「」で囲んで下さい。次に\nを追加して文法の説明を大学進学向けの英語の授業のように説明して下さい。その後\nを追加して、サイトのURL内容のどこを参考にしたかを明確にして下さい
+        - [[使いたい英語のフレーズ]]は、get_random_phrases({num})で取得して下さい
+        - phraseに[[使いたい英語のフレーズ]]を入れて下さい
+        - translationに[[使いたい英語のフレーズ]]の日本語訳を入れて下さい
+        - sentenceに[[使いたい英語のフレーズ]]を使った英文を入れて下さい
+          - 英文はミーティングは、社内ミーティングとし若干インフォーマルな口語にして下さい
+        - explanationにsentenceの英文の説明をして下さい。日本語訳を "日本語訳「日本語訳の説明」"と「」で囲んで下さい。次に\nを追加して文法の説明を大学進学向けの英語の授業のように説明して下さい。その後\nを追加して、サイトのURL内容のどこを参考にしたかを明確にして下さい
 
 
         [[サイトのURL]]
@@ -75,20 +72,21 @@ def create_prompt(url: str) -> str:
         {url}
 
 
-        出力は必ず以下の形式で行ってください：
-            {{
-                "phrases": [
-                    {{
-                        "phrase": "英語フレーズ",
-                        "translation": "日本語訳",
-                        "sentence": 英文",
-                        "explanation": "英文の説明"
-                    }}
-                ]
-            }}
+        出力は必ず以下のJSON形式で行ってください。またJSON以外の文字列を出力を絶対にしないこと。```jsonなどの装飾も不要です。
+        -----
+        {{
+            "phrases": [
+                {{
+                    "phrase": "英語フレーズ",
+                    "translation": "日本語訳",
+                    "sentence": 英文",
+                    "explanation": "英文の説明"
+                }}
+            ]
+        }}
     """
 
-    return template.format(url=url)
+    return template.format(url=url, num=num)
 
 @tool
 def extract_content_from_url(url: str) -> str:
@@ -118,9 +116,12 @@ def extract_content_from_url(url: str) -> str:
 
 def create_agent():
     tools = [extract_content_from_url, get_random_phrases]
-    model = ChatOpenAI(model="gpt-4o", temperature=0)
-    agent = create_react_agent(model=model, tools=tools)
+    model = ChatOpenAI(model="gpt-4o", temperature=0.5)
+    agent = create_react_agent(model=model, tools=tools, response_format=MeetingResponse)
     return agent
+
+
+from pydantic import ValidationError
 
 if __name__ == "__main__":
     # データを取得して表示
@@ -134,17 +135,15 @@ if __name__ == "__main__":
     # print(markdown_content)
 
     url = "https://konyu.hatenablog.com/entry/2024/12/07/000000"
-    inputs = { "messages": [("system", create_prompt(url))]}
+    inputs = { "messages": [("system", create_prompt(url, 3))]}
     agent = create_agent()
 
     # for state in agent.stream(inputs, stream_mode="values"):
     #     message = state["messages"][-1]
     #     message.pretty_print()
+
     res = agent.invoke(inputs)
-    print(res['messages'][-1].content)
     # 文字列からJSONへ変換
     content = res['messages'][-1].content
-    json_data = json.loads(content)
-    # JSONからPydanticモデルへ変換
-    mrs = MeetingResponse(**json_data)
-    print(mrs)
+    print("#### CONTENT ####")
+    print(content)
