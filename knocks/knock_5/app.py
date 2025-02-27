@@ -1,10 +1,40 @@
 import streamlit as st
-from sentens_maker import create_agent, create_prompt, MeetingResponse
+from sentens_maker import create_agent, create_prompt, MeetingResponse, read_phrases_csv
 import json
+import pandas as pd
 
 def main():
     st.title("英語ミーティングフレーズジェネレーター")
+    # 初期化
+    if 'show_phrases' not in st.session_state:
+        st.session_state.show_phrases = False
 
+    # フレーズCSVファイル表示機能を追加
+    st.markdown("### フレーズ一覧")
+
+    # ボタンのテキストを現在の状態に基づいて設定
+    button_text = "フレーズ一覧を閉じる" if st.session_state.show_phrases else "フレーズ一覧を表示"
+
+    # ボタンクリックのハンドラ - セッション状態を変更して再実行
+    if st.button(button_text, key="toggle_phrases"):
+        st.session_state.show_phrases = not st.session_state.show_phrases
+        st.rerun()  # ボタンラベルを更新するために再実行
+
+    # セッション状態に基づいてデータフレームを表示
+    if st.session_state.show_phrases:
+        try:
+            phrases_data = read_phrases_csv()
+            st.dataframe(
+                phrases_data,
+                column_config={
+                    "Phrase": "英語フレーズ",
+                    "Translation": "日本語訳",
+                },
+                use_container_width=True,
+                height=400
+            )
+        except Exception as e:
+            st.error(f"フレーズファイルの読み込みに失敗しました: {str(e)}")
     url = st.text_input(
         "題材のURLを指定して下さい",
         placeholder="https://example.com"
